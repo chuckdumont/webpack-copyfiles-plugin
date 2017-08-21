@@ -1,0 +1,16 @@
+{
+  "name": "webpack-copyfiles-plugin",
+  "version": "1.0.0",
+	"dependencies": {
+		"fs-extra": "2.0.0",
+		"hash-files": "1.1.1"
+	},
+  "peerDependencies": {
+    "webpack": ">= 2.2.0"
+  },
+  "license": "(Apache-2.0)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chuckdumont/webpack-copyfiles-plugin.git"
+  }
+}
