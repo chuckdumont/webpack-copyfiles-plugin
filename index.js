@@ -45,16 +45,30 @@ module.exports = class CopyFilesPlugin {
             if (err) {
               return reject(err);
             }
+            let sourceRootArray = this.options.sourceRoot;
+            let filesArray = this.options.files;
+            if (!Array.isArray(sourceRootArray)) {
+              sourceRootArray = [sourceRootArray];
+              filesArray = [filesArray];
+            } else if (sourceRootArray.length !== filesArray.length) {
+              throw new Error("Invalid number of array elements");
+            }
+            const filesCopied = [];
             async.parallel([
               (callback) => {
-                // Copy the files
-                console.log("Copying files to " + this.options.targetRoot);
-                async.each(this.options.files, (file, callback) => {
-                  fs.copy(path.resolve(this.options.sourceRoot, file), path.resolve(this.options.targetRoot, file), (err) => {
-                    if (err) {
-                      console.log(err);
-                    }
-                    callback(err);
+                async.eachOf(sourceRootArray, (sourceRoot, i, cb1) => {
+                  // Copy the files
+                  console.log(`Copying files from ${sourceRoot} to ${this.options.targetRoot}`);
+                  async.each(filesArray[i], (file, cb2) => {
+                    filesCopied.push(path.join(sourceRoot, file) + (file.endsWith("/") ? "**" : ""));
+                    fs.copy(path.resolve(sourceRoot, file), path.resolve(this.options.targetRoot, file), (err) => {
+                      if (err) {
+                        console.log(err);
+                      }
+                      cb2(err);
+                    });
+                  }, (err) => {
+                    cb1(err);
                   });
                 }, (err) => {
                   callback(err);
@@ -65,15 +79,9 @@ module.exports = class CopyFilesPlugin {
                 if (!this.options.renameTargetDir) {
                   return callback();
                 }
-                const files = [];
-                this.options.files.forEach((file) => {
-                  files.push(path.join(this.options.sourceRoot, file));
-                });
                 hashFiles({
                   algorithm: "sha256",
-                  files: this.options.files.map((file) => {
-                    return path.join(this.options.sourceRoot, file) + (file.endsWith("/") ? "**" : "");
-                  })
+                  files: filesCopied
                 }, (err, hash) => {
                   if (err) {
                     console.error(err);

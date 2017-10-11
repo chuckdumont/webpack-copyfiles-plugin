@@ -34,7 +34,7 @@ module.exports = {
 
 #### sourceRoot
 
-The root directory containing the source files to copy.  This option is required.
+The root directory containing the source files to copy.  This option is required.  It can be a string or an array.  If it is an array, then the `files` option must be an array consisting of the same number of elements.
 
 #### targetRoot
 
@@ -42,7 +42,7 @@ The target directory to copy the source files to.  This option is required.
 
 #### files
 
-Array of file/directory names to copy.  Directories are specified with a trailing `/`.  Relative path names are relative to `sourceRoot`.
+Array of file/directory names to copy.  Directories are specified with a trailing `/`.  Relative path names are relative to `sourceRoot`.  If `sourceRoot` is an array, then this option must be an array of arrays containing the same number of top level elements as `sourceRoot`.
 
 #### renameTargetDir
 
