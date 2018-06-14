@@ -1,5 +1,6 @@
 /*
- * (C) Copyright IBM Corp. 2012, 2016 All Rights Reserved.
+ * (C) Copyright HCL Technologies Ltd. 2018
+ * (C) Copyright IBM Corp. 2012, 2017 All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +21,7 @@ const hashFiles = require('hash-files');
 const fs  = require('fs-extra');
 const path = require('path');
 const async = require('async');
+const {tap} = require("webpack-plugin-compat").for("webpack-copyfiles-plugin");
 const ConstDependency = require("webpack/lib/dependencies/ConstDependency");
 const BasicEvaluatedExpression = require("webpack/lib/BasicEvaluatedExpression");
 
@@ -30,7 +32,7 @@ module.exports = class CopyFilesPlugin {
   }
   apply(compiler) {
 
-    compiler.plugin(["run", "watch-run"], (compilation__, callback) => {
+    tap(compiler, [[["run", "watch-run"], (compilation__, callback) => {
       if (!this.promise) {
         // First thread here gets to do the copy.
         this.promise = new Promise((resolve, reject) => {
@@ -132,12 +134,12 @@ module.exports = class CopyFilesPlugin {
       }, (err) => {
         callback(err);
       });
-    });
+    }]]);
 
     if (this.options.renameTargetDir && this.options.dirHashVarName) {
 
-      compiler.plugin("compilation", (compilaton__, data) => {
-        data.normalModuleFactory.plugin("parser", (parser) => {
+      tap(compiler, "compilation", (compilaton__, data) => {
+        tap(data.normalModuleFactory, "parser", (parser) => {
           parser.plugin("expression " + this.options.dirHashVarName , (expr) => {
             // change dirHashVarName expressions in the source to the hash value as a string.
             const hash = parser.applyPluginsBailResult("evaluate Identifier " + this.options.dirHashVarName, expr).string;
@@ -147,7 +149,7 @@ module.exports = class CopyFilesPlugin {
             return true;
           });
 
-          parser.plugin("evaluate typeof " + this.options.dirHashVarName, (expr) => {
+          tap(parser, "evaluate typeof " + this.options.dirHashVarName, (expr) => {
             // implement typeof operator for the expression
             var result = new BasicEvaluatedExpression().setString("string");
             if (expr) {
@@ -156,7 +158,7 @@ module.exports = class CopyFilesPlugin {
             return result;
           });
 
-          parser.plugin("evaluate Identifier " + this.options.dirHashVarName, (expr) => {
+          tap(parser, "evaluate Identifier " + this.options.dirHashVarName, (expr) => {
             var result = new BasicEvaluatedExpression().setString(this.filesHash);
             if (expr) {
               result.setRange(expr.range);
