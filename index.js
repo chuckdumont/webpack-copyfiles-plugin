@@ -1,6 +1,6 @@
 /*
  * (C) Copyright HCL Technologies Ltd. 2018
- * (C) Copyright IBM Corp. 2012, 2017 All Rights Reserved.
+ * (C) Copyright IBM Corp. 2012, 2016 All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,9 +21,9 @@ const hashFiles = require('hash-files');
 const fs  = require('fs-extra');
 const path = require('path');
 const async = require('async');
-const {tap} = require("webpack-plugin-compat").for("webpack-copyfiles-plugin");
 const ConstDependency = require("webpack/lib/dependencies/ConstDependency");
 const BasicEvaluatedExpression = require("webpack/lib/BasicEvaluatedExpression");
+const {tap, callSyncBail} = require("webpack-plugin-compat").for("webpack-copyfiles-plugin");
 
 /*eslint no-shadow: [2, { "allow": ["callback", "err"] }]*/
 module.exports = class CopyFilesPlugin {
@@ -140,9 +140,9 @@ module.exports = class CopyFilesPlugin {
 
       tap(compiler, "compilation", (compilaton__, data) => {
         tap(data.normalModuleFactory, "parser", (parser) => {
-          parser.plugin("expression " + this.options.dirHashVarName , (expr) => {
+          tap(parser, "expression " + this.options.dirHashVarName , (expr) => {
             // change dirHashVarName expressions in the source to the hash value as a string.
-            const hash = parser.applyPluginsBailResult("evaluate Identifier " + this.options.dirHashVarName, expr).string;
+            const hash = callSyncBail(parser, "evaluate Identifier " + this.options.dirHashVarName, expr).string;
             const dep = new ConstDependency("\"" + hash + "\"", expr.range);
             dep.loc = expr.loc;
             parser.state.current.addDependency(dep);
