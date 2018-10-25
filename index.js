@@ -21,152 +21,199 @@ const hashFiles = require('hash-files');
 const fs  = require('fs-extra');
 const path = require('path');
 const async = require('async');
-const ConstDependency = require("webpack/lib/dependencies/ConstDependency");
-const BasicEvaluatedExpression = require("webpack/lib/BasicEvaluatedExpression");
-const {tap, callSyncBail} = require("webpack-plugin-compat").for("webpack-copyfiles-plugin");
+const globby = require('globby');
+const ConstDependency = require('webpack/lib/dependencies/ConstDependency');
+const BasicEvaluatedExpression = require('webpack/lib/BasicEvaluatedExpression');
+const {tap, callSyncBail} = require('webpack-plugin-compat').for('webpack-copyfiles-plugin');
 
 /*eslint no-shadow: [2, { "allow": ["callback", "err"] }]*/
 module.exports = class CopyFilesPlugin {
   constructor(options) {
-    this.options = options;
+    this.optionsArray = Array.isArray(options) ? options : options;
   }
+
+	/**
+	 * Remove the cleanDirs and targetRoot directories
+	 *
+	 * @param {object} options - the options object.
+	 * @param {function} callback - the async callback
+	 */
+	cleanDirs(options, callback) {
+		async.each((options.cleanDirs || []).concat(options.targetRoot), (dir, callback) => {
+			fs.remove(dir, err => {
+				if (err) {
+					console.error(err);
+				}
+				callback(err);
+			});
+		}, err => callback(err));
+	}
+
+	/**
+	 * Copies the files specified by options
+	 *
+	 * @param {object} options - the options object
+	 * @param {array} filesCopied - Output.  On return, lists the files filesCopied
+	 * @param {function} callback - the async callback function
+	 */
+	copyFiles(options, filesCopied, callback) {
+		let sourceRootArray = options.sourceRoot;
+		let filesArray = options.files;
+		if (!Array.isArray(sourceRootArray)) {
+			sourceRootArray = [sourceRootArray];
+			filesArray = [filesArray];
+		} else if (sourceRootArray.length !== filesArray.length) {
+			return callback(new Error("Invalid number of array elements"));
+		}
+		async.eachOf(sourceRootArray, (sourceRoot, i, callback) => {
+			// Copy the files
+			console.log(`Copying files from ${sourceRoot} to ${options.targetRoot}`);
+
+			// For backwards compatibility, if an entry ends with '/', change to '/**/*'
+			filesArray[i].forEach((file, j) => {
+				if (file.endsWith('/')) {
+					filesArray[i][j] = file + '**/*';
+				}
+			});
+			globby(filesArray[i], {onlyFiles:true, absolute:true, cwd:sourceRoot}).then(paths => {
+				async.each(paths, (source, callback) => {
+					const target = path.resolve(options.targetRoot, path.relative(sourceRoot, source));
+					filesCopied.push(target);
+					fs.copy(source, target, err => {
+						if (err) {
+							console.error(err);
+						}
+						callback(err);
+					});
+				}, err => callback(err));
+			}).catch(err => callback(err));
+		}, err => callback(err));
+	}
+
+	/**
+	 * Renames the target directory to a hash of the directory's contents and
+	 * saves the hash for use by webpack variable substitution.
+	 *
+	 * @param {object} options - the options array
+	 * @param {array} filesCopied - Input. the list of files to use in calculating the hash
+	 * @param {function} the async callback
+	 */
+	renameDir(options, filesCopied, callback) {
+		console.log(`Copied ${filesCopied.length} files to ${options.targetRoot}`)
+		if (!options.renameTargetDir) {
+			return callback();
+		}
+		hashFiles({
+			algorithm: 'sha256',
+			files: filesCopied,
+			noGlob: true
+		}, (err, hash) => {
+			if (err) {
+				console.error(err);
+			}
+			options.filesHash = Buffer.from(hash, 'hex').toString('base64').replace(/[/+=]/g, c => {
+				switch (c) {
+					case '/': return '_';
+					case '+': return '-';
+					case '=': return '';
+				}
+				return c;
+			});
+			console.log(`Hash for ${filesCopied.length} copied files = ${options.filesHash}`);
+
+			// rename the target directory using the hash
+			let newPath = path.resolve(options.targetRoot, '..', options.filesHash);
+			fs.remove(newPath, err => {
+				if (err) {
+					return callback(err);
+				}
+				fs.rename(path.resolve(options.targetRoot), path.resolve(newPath), err => {
+					if (!err) {
+						console.log(`Renamed ${options.targetRoot} to ${newPath}`);
+					}
+					callback(err);
+				});
+			});
+		});
+	}
+
+	/**
+	 * The webpack entry point.  Called by the "compiler" event
+	 *
+	 * @param {object} compiler - Webpack compiler object
+	 */
   apply(compiler) {
 
-    tap(compiler, [[["run", "watch-run"], (compilation__, callback) => {
+    tap(compiler, [[['run', 'watch-run'], (compilation__, callback) => {
       if (!this.promise) {
         // First thread here gets to do the copy.
         this.promise = new Promise((resolve, reject) => {
-          async.each((this.options.cleanDirs || []).concat(this.options.targetRoot), (dir, callback) => {
-            fs.remove(dir, (err) => {
-              if (err) {
-                console.error(err);
-              }
-              callback(err);
-            });
-          }, (err) => {
-            if (err) {
-              return reject(err);
-            }
-            let sourceRootArray = this.options.sourceRoot;
-            let filesArray = this.options.files;
-            if (!Array.isArray(sourceRootArray)) {
-              sourceRootArray = [sourceRootArray];
-              filesArray = [filesArray];
-            } else if (sourceRootArray.length !== filesArray.length) {
-              throw new Error("Invalid number of array elements");
-            }
-            const filesCopied = [];
-            async.parallel([
-              (callback) => {
-                async.eachOf(sourceRootArray, (sourceRoot, i, cb1) => {
-                  // Copy the files
-                  console.log(`Copying files from ${sourceRoot} to ${this.options.targetRoot}`);
-                  async.each(filesArray[i], (file, cb2) => {
-                    filesCopied.push(path.join(sourceRoot, file) + (file.endsWith("/") ? "**" : ""));
-                    fs.copy(path.resolve(sourceRoot, file), path.resolve(this.options.targetRoot, file), (err) => {
-                      if (err) {
-                        console.log(err);
-                      }
-                      cb2(err);
-                    });
-                  }, (err) => {
-                    cb1(err);
-                  });
-                }, (err) => {
-                  callback(err);
-                });
-              },
-              // calculate a hash for the files
-              (callback) => {
-                if (!this.options.renameTargetDir) {
-                  return callback();
-                }
-                hashFiles({
-                  algorithm: "sha256",
-                  files: filesCopied
-                }, (err, hash) => {
-                  if (err) {
-                    console.error(err);
-                  }
-                  this.filesHash = Buffer.from(hash, "hex").toString('base64').replace(/[/+=]/g, (c) => {
-                    switch (c) {
-                      case '/': return '_';
-                      case '+': return '-';
-                      case '=': return '';
-                    }
-                    return c;
-                  });
-                  console.log("Hash for copied files = " + this.filesHash);
-                  callback(err);
-                });
-              }
-            ], (err) => {
-              if (err) {
-                return reject(err);
-              }
-              if (this.options.renameTargetDir) {
-                // rename the target directory using the hash
-                let newPath = path.resolve(this.options.targetRoot, "..", this.filesHash);
-                fs.remove(newPath, (err) => {
-                  if (err) {
-                    console.error(err);
-                    return reject(err);
-                  }
-                  fs.rename(path.resolve(this.options.targetRoot), path.resolve(newPath), (err) => {
-                    if (err) {
-                      reject.error(err);
-                    } else {
-                      console.log("Renamed " + this.options.targetRoot + " to " + newPath);
-                      resolve();
-                    }
-                  });
-                });
-              } else {
-                resolve();
-              }
-            });
-          });
+					async.series([
+						// First, remove any directories to be cleaned
+						callback => {
+							async.each(this.optionsArray, (options, callback) => {
+								this.cleanDirs(options, callback);
+							}, err => callback(err));
+						},
+						// Next, copy the files and rename the target directories as needed
+						callback => {
+							async.each(this.optionsArray, (options, callback) => {
+		            const filesCopied = [];
+		            async.series([
+									// Copy the files
+		              callback => this.copyFiles(options, filesCopied, callback),
+		              // Calculate a hash for the files abd rename target directory
+		              callback => this.renameDir(options, filesCopied, callback)
+		            ], err => callback(err));
+							}, err => callback(err));
+						}
+					], err => {
+						if (err) {
+							console.error(err);
+							reject(err);
+						} else {
+							resolve();
+						}
+					});
         });
       }
       // All threads block until the files have been copied.
-      this.promise.then(() => {
-        callback();
-      }, (err) => {
-        callback(err);
-      });
+      this.promise.then(() => callback(), err => callback(err));
     }]]);
 
-    if (this.options.renameTargetDir && this.options.dirHashVarName) {
+		this.optionsArray.forEach(options => {
+	    if (options.renameTargetDir && options.dirHashVarName) {
 
-      tap(compiler, "compilation", (compilaton__, data) => {
-        tap(data.normalModuleFactory, "parser", (parser) => {
-          tap(parser, "expression " + this.options.dirHashVarName , (expr) => {
-            // change dirHashVarName expressions in the source to the hash value as a string.
-            const hash = callSyncBail(parser, "evaluate Identifier " + this.options.dirHashVarName, expr).string;
-            const dep = new ConstDependency("\"" + hash + "\"", expr.range);
-            dep.loc = expr.loc;
-            parser.state.current.addDependency(dep);
-            return true;
-          });
+	      tap(compiler, 'compilation', (compilaton__, data) => {
+	        tap(data.normalModuleFactory, 'parser', parser => {
+	          tap(parser, 'expression ' + options.dirHashVarName , expr => {
+	            // change dirHashVarName expressions in the source to the hash value as a string.
+	            const hash = callSyncBail(parser, `evaluate Identifier ${options.dirHashVarName}`, expr).string;
+	            const dep = new ConstDependency('"' + hash + '\"', expr.range);
+	            dep.loc = expr.loc;
+	            parser.state.current.addDependency(dep);
+	            return true;
+	          });
 
-          tap(parser, "evaluate typeof " + this.options.dirHashVarName, (expr) => {
-            // implement typeof operator for the expression
-            var result = new BasicEvaluatedExpression().setString("string");
-            if (expr) {
-              result.setRange(expr.range);
-            }
-            return result;
-          });
+	          tap(parser, `evaluate typeof ${options.dirHashVarName}`, expr => {
+	            // implement typeof operator for the expression
+	            var result = new BasicEvaluatedExpression().setString('string');
+	            if (expr) {
+	              result.setRange(expr.range);
+	            }
+	            return result;
+	          });
 
-          tap(parser, "evaluate Identifier " + this.options.dirHashVarName, (expr) => {
-            var result = new BasicEvaluatedExpression().setString(this.filesHash);
-            if (expr) {
-              result.setRange(expr.range);
-            }
-            return result;
-          });
-        });
-      });
-    }
+	          tap(parser, `evaluate Identifier ${options.dirHashVarName}`, expr => {
+	            var result = new BasicEvaluatedExpression().setString(options.filesHash);
+	            if (expr) {
+	              result.setRange(expr.range);
+	            }
+	            return result;
+	          });
+	        });
+	      });
+			}
+		});
   }
 };
