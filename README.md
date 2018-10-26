@@ -32,6 +32,8 @@ module.exports = {
 ```
 ## Options
 
+Either an object containing the following properties, or an array of objects containing the following properties.  If an array, then each object in the array will be processed in parallel, except that all directory removals (`cleanDirs`, `targetRoot`) are performed before any files are copied.
+
 #### sourceRoot
 
 The root directory containing the source files to copy.  This option is required.  It can be a string or an array.  If it is an array, then the `files` option must be an array consisting of the same number of elements.
@@ -42,7 +44,9 @@ The target directory to copy the source files to.  This option is required.
 
 #### files
 
-Array of file/directory names to copy.  Directories are specified with a trailing `/`.  Relative path names are relative to `sourceRoot`.  If `sourceRoot` is an array, then this option must be an array of arrays containing the same number of top level elements as `sourceRoot`.
+Array of file names to copy.  Glob patterns are supported.  Relative path names are relative to `sourceRoot`.  If `sourceRoot` is an array, then this option must be an array of arrays containing the same number of top level elements as `sourceRoot`.
+
+For backwards compatibility, if a name ends with `/`, then the ending `/` is converted to the glob pattern `/**/*`
 
 #### renameTargetDir
 
