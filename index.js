@@ -29,7 +29,7 @@ const {tap, callSyncBail} = require('webpack-plugin-compat').for('webpack-copyfi
 /*eslint no-shadow: [2, { "allow": ["callback", "err"] }]*/
 module.exports = class CopyFilesPlugin {
   constructor(options) {
-    this.optionsArray = Array.isArray(options) ? options : options;
+    this.optionsArray = Array.isArray(options) ? options : [options];
   }
 
 	/**
