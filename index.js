@@ -68,14 +68,14 @@ module.exports = class CopyFilesPlugin {
 		async.eachOf(sourceRootArray, (sourceRoot, i, callback) => {
 			// Copy the files
 			console.log(`Copying files from ${sourceRoot} to ${options.targetRoot}`);
-
+			const files = [].concat(filesArray[i]);
 			// For backwards compatibility, if an entry ends with '/', change to '/**/*'
-			filesArray[i].forEach((file, j) => {
+			files.forEach((file, j) => {
 				if (file.endsWith('/')) {
-					filesArray[i][j] = file + '**/*';
+					files[j] = file + '**/*';
 				}
 			});
-			globby(filesArray[i], {onlyFiles:true, absolute:true, cwd:sourceRoot}).then(paths => {
+			globby(files, {onlyFiles:true, absolute:true, cwd:sourceRoot}).then(paths => {
 				async.each(paths, (source, callback) => {
 					const target = path.resolve(options.targetRoot, path.relative(sourceRoot, source));
 					filesCopied.push(target);
@@ -99,7 +99,7 @@ module.exports = class CopyFilesPlugin {
 	 * @param {function} the async callback
 	 */
 	renameDir(options, filesCopied, callback) {
-		console.log(`Copied ${filesCopied.length} files to ${options.targetRoot}`)
+		console.log(`Copied ${filesCopied.length} files to ${options.targetRoot}`);
 		if (!options.renameTargetDir) {
 			return callback();
 		}
