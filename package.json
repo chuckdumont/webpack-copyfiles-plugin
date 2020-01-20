@@ -1,6 +1,6 @@
 {
   "name": "webpack-copyfiles-plugin",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "dependencies": {
     "fs-extra": "2.0.0",
     "hash-files": "1.1.1",

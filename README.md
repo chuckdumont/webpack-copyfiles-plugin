@@ -50,7 +50,8 @@ For backwards compatibility, if a name ends with `/`, then the ending `/` is con
 
 #### renameTargetDir
 
-If true, the last path component of `targetRoot` will be renamed using a hash of the directory's contents.
+If true, the last path component of `targetRoot` will be renamed using a hash of the directory's contents.  Note that the hash is based on the contents
+of the target directory after all copying has completed, and may include files that were already in the target directory (if `cleanDirs` is not used), or files copied by other options when using a multi-element options array.
 
 #### dirHashVarName
 
@@ -59,3 +60,7 @@ If specified and `renameTargetDir` is true, then occurrences of the specified st
 #### cleanDirs
 
 Specifies an array of directory names to remove prior to copying the files.  `targetRoot` is always cleaned and therefore does not need to be specified here.
+
+#### filesVarName
+
+Optionally specifies the name of a webpack variable which will resolve to an array of file names of the files in the target directory after copying has completed.  This is the same list of files that is used to determine the hash used by `renameTargetDir`.
