@@ -1,5 +1,5 @@
 /*
- * (C) Copyright HCL Technologies Ltd. 2018
+ * (C) Copyright HCL Technologies Ltd. 2018, 2020
  * (C) Copyright IBM Corp. 2012, 2016 All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,7 +18,7 @@
 /* https://github.com/chuckdumont/webpack-copyfiles-plugin */
 
 const hashFiles = require('hash-files');
-const fs  = require('fs-extra');
+const fs = require('fs-extra');
 const path = require('path');
 const async = require('async');
 const globby = require('globby');
@@ -28,9 +28,10 @@ const {tap, callSyncBail} = require('webpack-plugin-compat').for('webpack-copyfi
 
 /*eslint no-shadow: [2, { "allow": ["callback", "err"] }]*/
 module.exports = class CopyFilesPlugin {
-  constructor(options) {
-    this.optionsArray = Array.isArray(options) ? options : [options];
-  }
+	constructor(options) {
+		this.byVarName = {};
+		this.optionsArray = Array.isArray(options) ? options : [options];
+	}
 
 	/**
 	 * Remove the cleanDirs and targetRoot directories
@@ -53,10 +54,9 @@ module.exports = class CopyFilesPlugin {
 	 * Copies the files specified by options
 	 *
 	 * @param {object} options - the options object
-	 * @param {array} filesCopied - Output.  On return, lists the files filesCopied
 	 * @param {function} callback - the async callback function
 	 */
-	copyFiles(options, filesCopied, callback) {
+	copyFiles(options, callback) {
 		let sourceRootArray = options.sourceRoot;
 		let filesArray = options.files;
 		if (!Array.isArray(sourceRootArray)) {
@@ -75,10 +75,15 @@ module.exports = class CopyFilesPlugin {
 					files[j] = file + '**/*';
 				}
 			});
+			var numCopied = 0;
 			globby(files, {onlyFiles:true, absolute:true, cwd:sourceRoot}).then(paths => {
 				async.each(paths, (source, callback) => {
-					const target = path.resolve(options.targetRoot, path.relative(sourceRoot, source));
-					filesCopied.push(target);
+					const relPath = path.relative(sourceRoot, source);
+					const target = path.resolve(options.targetRoot, relPath);
+					if (options.filesVarName && this.byVarName[options.filesVarName]) {
+						this.byVarName[options.filesVarName].push(relPath.replace(/\\/g, '/'));
+					}
+					numCopied++;
 					fs.copy(source, target, err => {
 						if (err) {
 							console.error(err);
@@ -86,6 +91,8 @@ module.exports = class CopyFilesPlugin {
 						callback(err);
 					});
 				}, err => callback(err));
+			}).then(() => {
+				console.log(`Copied ${numCopied} files from ${sourceRoot} to ${options.targetRoot}`);
 			}).catch(err => callback(err));
 		}, err => callback(err));
 	}
@@ -95,46 +102,46 @@ module.exports = class CopyFilesPlugin {
 	 * saves the hash for use by webpack variable substitution.
 	 *
 	 * @param {object} options - the options array
-	 * @param {array} filesCopied - Input. the list of files to use in calculating the hash
 	 * @param {function} the async callback
 	 */
-	renameDir(options, filesCopied, callback) {
-		console.log(`Copied ${filesCopied.length} files to ${options.targetRoot}`);
+	renameDir(options, callback) {
 		if (!options.renameTargetDir) {
 			return callback();
 		}
-		hashFiles({
-			algorithm: 'sha256',
-			files: filesCopied,
-			noGlob: true
-		}, (err, hash) => {
-			if (err) {
-				console.error(err);
-			}
-			options.filesHash = Buffer.from(hash, 'hex').toString('base64').replace(/[/+=]/g, c => {
-				switch (c) {
-					case '/': return '_';
-					case '+': return '-';
-					case '=': return '';
-				}
-				return c;
-			});
-			console.log(`Hash for ${filesCopied.length} copied files = ${options.filesHash}`);
-
-			// rename the target directory using the hash
-			let newPath = path.resolve(options.targetRoot, '..', options.filesHash);
-			fs.remove(newPath, err => {
+		globby(options.targetRoot, {onlyFiles:true, absolute:true}).then(files => {
+			hashFiles({
+				algorithm: 'sha256',
+				files: files,
+				noGlob: true
+			}, (err, hash) => {
 				if (err) {
 					return callback(err);
 				}
-				fs.rename(path.resolve(options.targetRoot), path.resolve(newPath), err => {
-					if (!err) {
-						console.log(`Renamed ${options.targetRoot} to ${newPath}`);
+				options.filesHash = Buffer.from(hash, 'hex').toString('base64').replace(/[/+=]/g, c => {
+					switch (c) {
+						case '/': return '_';
+						case '+': return '-';
+						case '=': return '';
 					}
-					callback(err);
+					return c;
+				});
+				console.log(`Hash for ${files.length} copied files = ${options.filesHash}`);
+
+				// rename the target directory using the hash
+				let newPath = path.resolve(options.targetRoot, '..', options.filesHash);
+				fs.remove(newPath, err => {
+					if (err) {
+						return callback(err);
+					}
+					fs.rename(path.resolve(options.targetRoot), path.resolve(newPath), err => {
+						if (!err) {
+							console.log(`Renamed ${options.targetRoot} to ${newPath}`);
+						};
+						callback(err);
+					});
 				});
 			});
-		});
+    }).catch(callback);
 	}
 
 	/**
@@ -142,12 +149,11 @@ module.exports = class CopyFilesPlugin {
 	 *
 	 * @param {object} compiler - Webpack compiler object
 	 */
-  apply(compiler) {
-
-    tap(compiler, [[['run', 'watch-run'], (compilation__, callback) => {
-      if (!this.promise) {
-        // First thread here gets to do the copy.
-        this.promise = new Promise((resolve, reject) => {
+	apply(compiler) {
+		tap(compiler, [[['run', 'watch-run'], (compilation__, callback) => {
+			if (!this.promise) {
+				// First thread here gets to do the copy.
+				this.promise = new Promise((resolve, reject) => {
 					async.series([
 						// First, remove any directories to be cleaned
 						callback => {
@@ -157,15 +163,20 @@ module.exports = class CopyFilesPlugin {
 						},
 						// Next, copy the files and rename the target directories as needed
 						callback => {
-							async.each(this.optionsArray, (options, callback) => {
-		            const filesCopied = [];
-		            async.series([
-									// Copy the files
-		              callback => this.copyFiles(options, filesCopied, callback),
-		              // Calculate a hash for the files abd rename target directory
-		              callback => this.renameDir(options, filesCopied, callback)
-		            ], err => callback(err));
-							}, err => callback(err));
+							async.series([
+								callback => {
+									async.each(this.optionsArray, (options, callback) => {
+										// Copy the files
+										this.copyFiles(options, callback);
+									}, err => callback(err));
+								},
+								callback => {
+									async.each(this.optionsArray, (options, callback) => {
+										// Copy the files
+										this.renameDir(options, callback);
+									}, err => callback(err));
+								}
+							], err => callback(err));
 						}
 					], err => {
 						if (err) {
@@ -175,45 +186,77 @@ module.exports = class CopyFilesPlugin {
 							resolve();
 						}
 					});
-        });
-      }
-      // All threads block until the files have been copied.
-      this.promise.then(() => callback(), err => callback(err));
-    }]]);
+				});
+			}
+			// All threads block until the files have been copied.
+			this.promise.then(() => callback(), err => callback(err));
+		}]]);
 
 		this.optionsArray.forEach(options => {
-	    if (options.renameTargetDir && options.dirHashVarName) {
+			if (options.filesVarName && !this.byVarName[options.filesVarName]) {
+				this.byVarName[options.filesVarName] = [];
+			}
+			if (options.renameTargetDir && options.dirHashVarName || options.filesVarName) {
+				tap(compiler, 'compilation', (compilaton__, data) => {
+					tap(data.normalModuleFactory, 'parser', parser => {
+						if (options.dirHashVarName) {
+							tap(parser, 'expression ' + options.dirHashVarName , expr => {
+								// change dirHashVarName expressions in the source to the hash value as a string.
+								const hash = callSyncBail(parser, `evaluate Identifier ${options.dirHashVarName}`, expr).string;
+								const dep = new ConstDependency('"' + hash + '\"', expr.range);
+								dep.loc = expr.loc;
+								parser.state.current.addDependency(dep);
+								return true;
+							});
 
-	      tap(compiler, 'compilation', (compilaton__, data) => {
-	        tap(data.normalModuleFactory, 'parser', parser => {
-	          tap(parser, 'expression ' + options.dirHashVarName , expr => {
-	            // change dirHashVarName expressions in the source to the hash value as a string.
-	            const hash = callSyncBail(parser, `evaluate Identifier ${options.dirHashVarName}`, expr).string;
-	            const dep = new ConstDependency('"' + hash + '\"', expr.range);
-	            dep.loc = expr.loc;
-	            parser.state.current.addDependency(dep);
-	            return true;
-	          });
+							tap(parser, `evaluate typeof ${options.dirHashVarName}`, expr => {
+								// implement typeof operator for the expression
+								var result = new BasicEvaluatedExpression().setString('string');
+								if (expr) {
+									result.setRange(expr.range);
+								}
+								return result;
+							});
 
-	          tap(parser, `evaluate typeof ${options.dirHashVarName}`, expr => {
-	            // implement typeof operator for the expression
-	            var result = new BasicEvaluatedExpression().setString('string');
-	            if (expr) {
-	              result.setRange(expr.range);
-	            }
-	            return result;
-	          });
+							tap(parser, `evaluate Identifier ${options.dirHashVarName}`, expr => {
+								var result = new BasicEvaluatedExpression().setString(options.filesHash);
+								if (expr) {
+									result.setRange(expr.range);
+								}
+								return result;
+							});
+						}
 
-	          tap(parser, `evaluate Identifier ${options.dirHashVarName}`, expr => {
-	            var result = new BasicEvaluatedExpression().setString(options.filesHash);
-	            if (expr) {
-	              result.setRange(expr.range);
-	            }
-	            return result;
-	          });
-	        });
-	      });
+						if (options.filesVarName) {
+							tap(parser, 'expression ' + options.filesVarName , expr => {
+								// change filesVarName expressions in the source to the files array.
+								const files = callSyncBail(parser, `evaluate Identifier ${options.filesVarName}`, expr).array;
+								const dep = new ConstDependency(JSON.stringify(files), expr.range);
+								dep.loc = expr.loc;
+								parser.state.current.addDependency(dep);
+								return true;
+							});
+
+							tap(parser, `evaluate typeof ${options.filesVarName}`, expr => {
+								// implement typeof operator for the expression
+								var result = new BasicEvaluatedExpression().setString('array');
+								if (expr) {
+									result.setRange(expr.range);
+								}
+								return result;
+							});
+
+							tap(parser, `evaluate Identifier ${options.filesVarName}`, expr => {
+								var result = new BasicEvaluatedExpression().setArray(this.byVarName[options.filesVarName]);
+								if (expr) {
+									result.setRange(expr.range);
+								}
+								return result;
+							});
+						}
+					});
+				});
 			}
 		});
-  }
+	}
 };
