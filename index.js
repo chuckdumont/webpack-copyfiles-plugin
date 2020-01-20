@@ -108,7 +108,7 @@ module.exports = class CopyFilesPlugin {
 		if (!options.renameTargetDir) {
 			return callback();
 		}
-		globby(options.targetRoot, {onlyFiles:true, absolute:true}).then(files => {
+		globby('**/*', {onlyFiles:true, absolute:true, cwd:options.targetRoot}).then(files => {
 			hashFiles({
 				algorithm: 'sha256',
 				files: files,
@@ -125,7 +125,7 @@ module.exports = class CopyFilesPlugin {
 					}
 					return c;
 				});
-				console.log(`Hash for ${files.length} copied files = ${options.filesHash}`);
+				console.log(`Hash for ${files.length} files in ${options.targetRoot} = ${options.filesHash}`);
 
 				// rename the target directory using the hash
 				let newPath = path.resolve(options.targetRoot, '..', options.filesHash);
