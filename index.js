@@ -80,9 +80,6 @@ module.exports = class CopyFilesPlugin {
 				async.each(paths, (source, callback) => {
 					const relPath = path.relative(sourceRoot, source);
 					const target = path.resolve(options.targetRoot, relPath);
-					if (options.filesVarName && this.byVarName[options.filesVarName]) {
-						this.byVarName[options.filesVarName].push(relPath.replace(/\\/g, '/'));
-					}
 					numCopied++;
 					fs.copy(source, target, err => {
 						if (err) {
@@ -104,11 +101,22 @@ module.exports = class CopyFilesPlugin {
 	 * @param {object} options - the options array
 	 * @param {function} the async callback
 	 */
-	renameDir(options, callback) {
-		if (!options.renameTargetDir) {
+	postProcessDir(options, callback) {
+		if (!options.renameTargetDir && !options.filesVarName) {
 			return callback();
 		}
 		globby('**/*', {onlyFiles:true, absolute:true, cwd:options.targetRoot}).then(files => {
+			if (options.filesVarName) {
+				this.byVarName[options.filesVarName] = [];
+				files.forEach(file => {
+					const relPath = path.relative(options.targetRoot, file);
+					this.byVarName[options.filesVarName].push(relPath.replace(/\\/g, '/'));
+				});
+			}
+			if (!options.renameTargetDir) {
+				return callback();
+			}
+			// Need to rename the target directory.
 			hashFiles({
 				algorithm: 'sha256',
 				files: files,
@@ -173,7 +181,7 @@ module.exports = class CopyFilesPlugin {
 								callback => {
 									async.each(this.optionsArray, (options, callback) => {
 										// Copy the files
-										this.renameDir(options, callback);
+										this.postProcessDir(options, callback);
 									}, err => callback(err));
 								}
 							], err => callback(err));
@@ -193,9 +201,6 @@ module.exports = class CopyFilesPlugin {
 		}]]);
 
 		this.optionsArray.forEach(options => {
-			if (options.filesVarName && !this.byVarName[options.filesVarName]) {
-				this.byVarName[options.filesVarName] = [];
-			}
 			if (options.renameTargetDir && options.dirHashVarName || options.filesVarName) {
 				tap(compiler, 'compilation', (compilaton__, data) => {
 					tap(data.normalModuleFactory, 'parser', parser => {
